@@ -389,8 +389,8 @@ async function uploadFileToTelegram(context, fullId, metadata, fileExt, fileName
 
     const telegramAPI = new TelegramAPI(tgBotToken);
 
-    // 5MB 分片阈值 - reduced from 20MB to accommodate D1 storage limits
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+    // 3MB 分片阈值 - reduced from 5MB to better accommodate D1 SQLite limits
+    const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB
 
     if (fileSize > CHUNK_SIZE) {
         // 大文件分片上传

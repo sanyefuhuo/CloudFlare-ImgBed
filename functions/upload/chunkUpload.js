@@ -135,14 +135,12 @@ export async function handleChunkUpload(context) {
             timeoutThreshold: uploadStartTime + 60000 // 1分钟超时阈值
         };
 
-        // 立即保存分块记录和数据，设置过期时间
-        await db.put(chunkKey, chunkData, {
-            metadata: initialChunkMetadata,
-            expirationTtl: 3600 // 1小时过期
-        });
+        // 立即保存分块记录，但不保存实际的chunk数据以避免D1 SQLITE_TOOBIG错误
+        // 只保存元数据，chunk数据在内存中处理
+        await saveChunkMetadataWithRetry(db, chunkKey, initialChunkMetadata);
 
         // 同步上传分块到存储端，添加超时保护
-        await uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel);
+        await uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel, chunkData);
 
         return createResponse(JSON.stringify({
             success: true,
@@ -191,8 +189,32 @@ export async function handleCleanupRequest(context, uploadId, totalChunks) {
 
 /* ======= 单个分块上传到不同渠道的存储端 ======= */
 
+// 重试次数和指数退避的元数据保存函数
+async function saveChunkMetadataWithRetry(db, chunkKey, metadata, maxRetries = 3) {
+    let lastError;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            await db.put(chunkKey, '', {
+                metadata: metadata,
+                expirationTtl: 3600
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+            const isTooBig = error.message && error.message.includes('SQLITE_TOOBIG');
+            if (!isTooBig) {
+                throw error;
+            }
+            const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
+            console.warn(`Chunk metadata save failed (attempt ${attempt + 1}/${maxRetries}, SQLITE_TOOBIG), retrying in ${backoffMs}ms...`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+        }
+    }
+    throw new Error(`Failed to save chunk metadata after ${maxRetries} attempts: ${lastError.message}`);
+}
+
 // 带超时保护的异步上传分块到存储端
-async function uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel) {
+async function uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel, chunkData) {
     const { env } = context;
     const db = getDatabase(env);
     const chunkKey = `chunk_${uploadId}_${chunkIndex.toString().padStart(3, '0')}`;
@@ -205,7 +227,7 @@ async function uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks,
         });
 
         // 执行实际上传
-        const uploadPromise = uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel);
+        const uploadPromise = uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel, chunkData);
 
         // 竞速执行
         await Promise.race([uploadPromise, timeoutPromise]);
@@ -215,7 +237,7 @@ async function uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks,
 
         // 超时或失败时，更新状态为超时/失败
         try {
-            const chunkRecord = await db.getWithMetadata(chunkKey, { type: 'arrayBuffer' });
+            const chunkRecord = await db.getWithMetadata(chunkKey);
             if (chunkRecord && chunkRecord.metadata) {
                 const isTimeout = error.message === 'Upload timeout';
                 const errorMetadata = {
@@ -226,11 +248,8 @@ async function uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks,
                     isTimeout: isTimeout
                 };
 
-                // 保留原始数据以便重试
-                await db.put(chunkKey, chunkRecord.value, {
-                    metadata: errorMetadata,
-                    expirationTtl: 3600
-                });
+                // 使用重试机制保存失败状态
+                await saveChunkMetadataWithRetry(db, chunkKey, errorMetadata);
             }
         } catch (metaError) {
             console.error('Failed to save timeout/error metadata:', metaError);
@@ -239,7 +258,7 @@ async function uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks,
 }
 
 // 异步上传分块到存储端，失败自动重试
-async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel) {
+async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel, chunkData) {
     const { env } = context;
     const db = getDatabase(env);
 
@@ -248,14 +267,13 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
     const MAX_RETRIES = 3;
 
     try {
-        // 从数据库分块数据和metadata
-        const chunkRecord = await db.getWithMetadata(chunkKey, { type: 'arrayBuffer' });
-        if (!chunkRecord || !chunkRecord.value) {
-            console.error(`Chunk ${chunkIndex} data not found in database`);
+        // 获取chunk metadata
+        const chunkRecord = await db.getWithMetadata(chunkKey);
+        if (!chunkRecord || !chunkRecord.metadata) {
+            console.error(`Chunk ${chunkIndex} metadata not found in database`);
             return;
         }
 
-        const chunkData = chunkRecord.value;
         const chunkMetadata = chunkRecord.metadata;
 
         for (let retry = 0; retry < MAX_RETRIES; retry++) {
@@ -279,17 +297,14 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
                     completedTime: Date.now()
                 };
 
-                // 只保存metadata，不保存原始数据，设置过期时间
-                await db.put(chunkKey, '', {
-                    metadata: updatedMetadata,
-                    expirationTtl: 3600 // 1小时过期
-                });
+                // 只保存metadata，不保存原始数据，使用重试机制
+                await saveChunkMetadataWithRetry(db, chunkKey, updatedMetadata);
 
                 console.log(`Chunk ${chunkIndex} uploaded successfully to ${uploadChannel}`);
 
                 break;
             } else if (retry === MAX_RETRIES - 1) {
-                // 最后一次上传失败，标记为失败状态并保留原始数据以便重试
+                // 最后一次上传失败，标记为失败状态
                 const failedMetadata = {
                     ...chunkMetadata,
                     status: 'failed',
@@ -297,11 +312,8 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
                     failedTime: Date.now()
                 };
 
-                // 保留原始数据以便重试，设置过期时间
-                await db.put(chunkKey, chunkData, {
-                    metadata: failedMetadata,
-                    expirationTtl: 3600 // 1小时过期
-                });
+                // 只保存metadata，不保存chunk数据
+                await saveChunkMetadataWithRetry(db, chunkKey, failedMetadata);
 
                 console.warn(`Chunk ${chunkIndex} upload failed: ${failedMetadata.error}`);
             }
@@ -310,9 +322,9 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
     } catch (error) {
         console.error(`Error uploading chunk ${chunkIndex}:`, error);
 
-        // 发生异常时，确保保留原始数据并标记为失败
+        // 发生异常时，标记为失败
         try {
-            const chunkRecord = await db.getWithMetadata(chunkKey, { type: 'arrayBuffer' });
+            const chunkRecord = await db.getWithMetadata(chunkKey);
             if (chunkRecord && chunkRecord.metadata) {
                 const errorMetadata = {
                     ...chunkRecord.metadata,
@@ -321,10 +333,7 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
                     failedTime: Date.now()
                 };
 
-                await db.put(chunkKey, chunkRecord.value, {
-                    metadata: errorMetadata,
-                    expirationTtl: 3600 // 1小时过期
-                });
+                await saveChunkMetadataWithRetry(db, chunkKey, errorMetadata);
             }
         } catch (metaError) {
             console.error('Failed to save error metadata:', metaError);
@@ -881,10 +890,7 @@ export async function checkChunkUploadStatuses(env, uploadId, totalChunks) {
                         timeoutDetectedTime: currentTime
                     };
 
-                    await db.put(chunkKey, chunkRecord.value, {
-                        metadata: timeoutMetadata,
-                        expirationTtl: 3600
-                    }).catch(err => console.warn(`Failed to update timeout status for chunk ${i}:`, err));
+                    await saveChunkMetadataWithRetry(db, chunkKey, timeoutMetadata).catch(err => console.warn(`Failed to update timeout status for chunk ${i}:`, err));
                 }
 
                 let hasData = false;
@@ -892,11 +898,11 @@ export async function checkChunkUploadStatuses(env, uploadId, totalChunks) {
                     // 已完成的分块，不存储原始数据
                     hasData = false;
                 } else if (status === 'uploading' || status === 'failed' || status === 'timeout') {
-                    // 正在上传、失败或超时的分块通过原始数据判断
-                    hasData = (chunkRecord.value && chunkRecord.value.byteLength > 0);
+                    // 这些状态不再存储实际的chunk数据以避免SQLITE_TOOBIG错误
+                    hasData = false;
                 } else {
-                    // 其他状态也检查是否有数据
-                    hasData = (chunkRecord.value && chunkRecord.value.byteLength > 0);
+                    // 其他状态也不存储chunk数据
+                    hasData = false;
                 }
 
                 chunkStatuses.push({
@@ -1019,12 +1025,12 @@ export async function uploadLargeFileToTelegram(context, file, fullId, metadata,
     const { env, waitUntil } = context;
     const db = getDatabase(env);
 
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB - reduced from 20MB to accommodate D1 storage limits
+    const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB - reduced from 5MB to better accommodate D1 SQLite limits
     const fileSize = file.size;
     const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
 
     // Removed file size limit to allow larger uploads. Cloudflare Workers can handle the increased number of chunks.
-    // The chunk size has been reduced to 5MB to fit within D1 storage constraints.
+    // The chunk size has been reduced to 3MB to fit within D1 SQLite storage constraints and avoid SQLITE_TOOBIG errors.
 
     const chunks = [];
     const uploadedChunks = [];
