@@ -47,11 +47,9 @@ export async function initializeChunkedUpload(context) {
             expiresAt: timestamp + 3600000 // 1小时过期
         };
 
-        // 保存会话信息
+        // 保存会话信息，使用重试确保成功
         const sessionKey = `upload_session_${uploadId}`;
-        await db.put(sessionKey, JSON.stringify(sessionInfo), {
-            expirationTtl: 3600 // 1小时过期
-        });
+        await saveSessionWithRetry(db, sessionKey, sessionInfo);
 
         return createResponse(JSON.stringify({
             success: true,
@@ -119,7 +117,9 @@ export async function handleChunkUpload(context) {
 
         // 立即创建分块记录，标记为"uploading"状态
         const chunkKey = `chunk_${uploadId}_${chunkIndex.toString().padStart(3, '0')}`;
+        const metadataStartTime = Date.now();
         const chunkData = await chunk.arrayBuffer();
+        const chunkConversionTime = Date.now() - metadataStartTime;
         const uploadStartTime = Date.now();
         const initialChunkMetadata = {
             uploadId,
@@ -132,12 +132,19 @@ export async function handleChunkUpload(context) {
             uploadStartTime: uploadStartTime,
             status: 'uploading',
             uploadChannel,
-            timeoutThreshold: uploadStartTime + 60000 // 1分钟超时阈值
+            timeoutThreshold: uploadStartTime + 300000 // 5分钟超时阈值（与异步上传超时保护匹配）
         };
 
         // 立即保存分块记录，但不保存实际的chunk数据以避免D1 SQLITE_TOOBIG错误
         // 只保存元数据，chunk数据在内存中处理
+        const metadataSaveStart = Date.now();
         await saveChunkMetadataWithRetry(db, chunkKey, initialChunkMetadata);
+        const metadataSaveTime = Date.now() - metadataSaveStart;
+        
+        if (chunkIndex === 0) {
+            console.log(`Upload session initialized: uploadId=${uploadId}, totalChunks=${totalChunks}, channel=${uploadChannel}`);
+        }
+        console.log(`Chunk ${chunkIndex} metadata saved in ${metadataSaveTime}ms, chunk size=${(chunkData.byteLength / 1024 / 1024).toFixed(2)}MB`);
 
         // 同步上传分块到存储端，添加超时保护
         await uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType, uploadChannel, chunkData);
@@ -189,8 +196,34 @@ export async function handleCleanupRequest(context, uploadId, totalChunks) {
 
 /* ======= 单个分块上传到不同渠道的存储端 ======= */
 
+// 保存上传会话信息，使用重试机制
+async function saveSessionWithRetry(db, sessionKey, sessionInfo, maxRetries = 5) {
+    let lastError;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            await db.put(sessionKey, JSON.stringify(sessionInfo), {
+                expirationTtl: 3600
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+            const isRetryable = error.message && (error.message.includes('SQLITE_TOOBIG') || error.message.includes('database is locked'));
+            if (!isRetryable) {
+                throw error;
+            }
+            
+            if (attempt < maxRetries - 1) {
+                const backoffMs = Math.min(500 * Math.pow(2, attempt), 15000);
+                console.warn(`Session save failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${backoffMs}ms...`);
+                await new Promise(resolve => setTimeout(resolve, backoffMs));
+            }
+        }
+    }
+    throw new Error(`Failed to save session after ${maxRetries} attempts: ${lastError.message}`);
+}
+
 // 重试次数和指数退避的元数据保存函数
-async function saveChunkMetadataWithRetry(db, chunkKey, metadata, maxRetries = 3) {
+async function saveChunkMetadataWithRetry(db, chunkKey, metadata, maxRetries = 5) {
     let lastError;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
@@ -198,16 +231,23 @@ async function saveChunkMetadataWithRetry(db, chunkKey, metadata, maxRetries = 3
                 metadata: metadata,
                 expirationTtl: 3600
             });
+            if (attempt > 0) {
+                console.log(`Chunk metadata save succeeded on attempt ${attempt + 1}/${maxRetries}`);
+            }
             return;
         } catch (error) {
             lastError = error;
             const isTooBig = error.message && error.message.includes('SQLITE_TOOBIG');
-            if (!isTooBig) {
+            const isLocked = error.message && error.message.includes('database is locked');
+            if (!isTooBig && !isLocked) {
                 throw error;
             }
-            const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
-            console.warn(`Chunk metadata save failed (attempt ${attempt + 1}/${maxRetries}, SQLITE_TOOBIG), retrying in ${backoffMs}ms...`);
-            await new Promise(resolve => setTimeout(resolve, backoffMs));
+            
+            if (attempt < maxRetries - 1) {
+                const backoffMs = Math.min(500 * Math.pow(2, attempt), 15000);
+                console.warn(`Chunk metadata save failed (attempt ${attempt + 1}/${maxRetries}, ${isTooBig ? 'SQLITE_TOOBIG' : 'locked'}), retrying in ${backoffMs}ms...`);
+                await new Promise(resolve => setTimeout(resolve, backoffMs));
+            }
         }
     }
     throw new Error(`Failed to save chunk metadata after ${maxRetries} attempts: ${lastError.message}`);
@@ -264,7 +304,7 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
 
     const chunkKey = `chunk_${uploadId}_${chunkIndex.toString().padStart(3, '0')}`;
 
-    const MAX_RETRIES = 3;
+    const MAX_RETRIES = 5;
 
     try {
         // 获取chunk metadata
@@ -277,45 +317,70 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
         const chunkMetadata = chunkRecord.metadata;
 
         for (let retry = 0; retry < MAX_RETRIES; retry++) {
-            // 根据渠道上传分块
-            let uploadResult = null;
+            try {
+                // 根据渠道上传分块
+                let uploadResult = null;
 
-            if (uploadChannel === 'cfr2') {
-                uploadResult = await uploadSingleChunkToR2Multipart(context, chunkData, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType);
-            } else if (uploadChannel === 's3') {
-                uploadResult = await uploadSingleChunkToS3Multipart(context, chunkData, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType);
-            } else if (uploadChannel === 'telegram') {
-                uploadResult = await uploadSingleChunkToTelegram(context, chunkData, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType);
-            }
+                if (uploadChannel === 'cfr2') {
+                    uploadResult = await uploadSingleChunkToR2Multipart(context, chunkData, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType);
+                } else if (uploadChannel === 's3') {
+                    uploadResult = await uploadSingleChunkToS3Multipart(context, chunkData, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType);
+                } else if (uploadChannel === 'telegram') {
+                    uploadResult = await uploadSingleChunkToTelegram(context, chunkData, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType);
+                }
 
-            if (uploadResult && uploadResult.success) {
-                // 上传成功，更新状态并保存上传信息
-                const updatedMetadata = {
-                    ...chunkMetadata,
-                    status: 'completed',
-                    uploadResult: uploadResult,
-                    completedTime: Date.now()
-                };
+                if (uploadResult && uploadResult.success) {
+                    // 上传成功，更新状态并保存上传信息
+                    const updatedMetadata = {
+                        ...chunkMetadata,
+                        status: 'completed',
+                        uploadResult: uploadResult,
+                        completedTime: Date.now(),
+                        retryAttempts: retry
+                    };
 
-                // 只保存metadata，不保存原始数据，使用重试机制
-                await saveChunkMetadataWithRetry(db, chunkKey, updatedMetadata);
+                    // 只保存metadata，不保存原始数据，使用重试机制
+                    await saveChunkMetadataWithRetry(db, chunkKey, updatedMetadata);
 
-                console.log(`Chunk ${chunkIndex} uploaded successfully to ${uploadChannel}`);
+                    console.log(`Chunk ${chunkIndex} uploaded successfully to ${uploadChannel} (attempt ${retry + 1})`);
 
-                break;
-            } else if (retry === MAX_RETRIES - 1) {
-                // 最后一次上传失败，标记为失败状态
-                const failedMetadata = {
-                    ...chunkMetadata,
-                    status: 'failed',
-                    error: uploadResult ? uploadResult.error : 'Unknown error',
-                    failedTime: Date.now()
-                };
+                    break;
+                } else {
+                    // 上传失败，准备重试
+                    const errorMsg = uploadResult ? uploadResult.error : 'Unknown error';
+                    if (retry < MAX_RETRIES - 1) {
+                        // 计算退避时间，使用jitter避免thundering herd
+                        const baseBackoffMs = Math.min(1000 * Math.pow(2, retry), 30000);
+                        const jitterMs = Math.random() * baseBackoffMs * 0.1;
+                        const totalBackoffMs = baseBackoffMs + jitterMs;
+                        console.warn(`Chunk ${chunkIndex} upload attempt ${retry + 1} failed: ${errorMsg}, retrying in ${Math.round(totalBackoffMs)}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, totalBackoffMs));
+                    } else {
+                        // 最后一次上传失败，标记为失败状态
+                        const failedMetadata = {
+                            ...chunkMetadata,
+                            status: 'failed',
+                            error: errorMsg,
+                            failedTime: Date.now(),
+                            retryAttempts: retry
+                        };
 
-                // 只保存metadata，不保存chunk数据
-                await saveChunkMetadataWithRetry(db, chunkKey, failedMetadata);
+                        // 只保存metadata，不保存chunk数据
+                        await saveChunkMetadataWithRetry(db, chunkKey, failedMetadata);
 
-                console.warn(`Chunk ${chunkIndex} upload failed: ${failedMetadata.error}`);
+                        console.warn(`Chunk ${chunkIndex} upload failed after ${retry + 1} attempts: ${errorMsg}`);
+                    }
+                }
+            } catch (attemptError) {
+                console.error(`Chunk ${chunkIndex} upload attempt ${retry + 1} error:`, attemptError);
+                if (retry === MAX_RETRIES - 1) {
+                    throw attemptError;
+                }
+                // 计算退避时间
+                const baseBackoffMs = Math.min(1000 * Math.pow(2, retry), 30000);
+                const jitterMs = Math.random() * baseBackoffMs * 0.1;
+                const totalBackoffMs = baseBackoffMs + jitterMs;
+                await new Promise(resolve => setTimeout(resolve, totalBackoffMs));
             }
         }
 
