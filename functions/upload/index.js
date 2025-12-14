@@ -389,12 +389,12 @@ async function uploadFileToTelegram(context, fullId, metadata, fileExt, fileName
 
     const telegramAPI = new TelegramAPI(tgBotToken);
 
-    // 20MB 分片阈值
-    const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
+    // 5MB 分片阈值 - reduced from 20MB to accommodate D1 storage limits
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
 
     if (fileSize > CHUNK_SIZE) {
         // 大文件分片上传
-        return await uploadLargeFileToTelegram(env, file, fullId, metadata, fileName, fileType, url, returnLink, tgBotToken, tgChatId, tgChannel);
+        return await uploadLargeFileToTelegram(context, file, fullId, metadata, fileName, fileType, returnLink, tgBotToken, tgChatId, tgChannel);
     }
 
     // 由于TG会把gif后缀的文件转为视频，所以需要修改后缀名绕过限制

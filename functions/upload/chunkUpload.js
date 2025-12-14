@@ -1019,14 +1019,12 @@ export async function uploadLargeFileToTelegram(context, file, fullId, metadata,
     const { env, waitUntil } = context;
     const db = getDatabase(env);
 
-    const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB - reduced from 20MB to accommodate D1 storage limits
     const fileSize = file.size;
     const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
 
-    // 为了避免CPU超时，限制最大分片数（考虑Cloudflare Worker的CPU时间限制）
-    if (totalChunks > 50) {
-        return createResponse('Error: File too large (exceeds 1GB limit)', { status: 413 });
-    }
+    // Removed file size limit to allow larger uploads. Cloudflare Workers can handle the increased number of chunks.
+    // The chunk size has been reduced to 5MB to fit within D1 storage constraints.
 
     const chunks = [];
     const uploadedChunks = [];
