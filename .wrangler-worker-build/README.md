@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "cloudflare-imgbed" generated at 2026-03-09T12:05:42.699Z.

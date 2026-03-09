@@ -133,9 +133,9 @@
 >
 > ### What's included
 >
-> - `wrangler.jsonc` for Worker deployment configuration
-> - `workers/index.js` to reuse the existing `functions/**` serverless handlers
-> - `npm run worker:prepare` to generate a safe `dist-worker/` asset directory and the Worker route manifest
+> - `wrangler.toml` for Worker deployment configuration
+> - `src/worker.js` to reuse the existing `functions/**` handlers through an explicit Worker route table
+> - `scripts/copy-assets.mjs` and `.assetsignore` to prepare `.wrangler-assets/` safely before deployment
 >
 > ### Deployment steps
 >
@@ -145,7 +145,7 @@
 >    npm install
 >    ```
 >
-> 2. Update `wrangler.jsonc`. Only the KV binding is required:
+> 2. Update `wrangler.toml`. Only the KV binding is required:
 >
 >    - `img_url`: KV namespace
 >
@@ -155,7 +155,13 @@
 >    npm run worker:dev
 >    ```
 >
-> 4. Deploy to Cloudflare Workers:
+> 4. Run the Worker dry-run build check:
+>
+>    ```bash
+>    npm run build:worker
+>    ```
+>
+> 5. Deploy to Cloudflare Workers:
 >
 >    ```bash
 >    npm run worker:deploy
@@ -163,9 +169,9 @@
 >
 > ### Notes
 >
-> - The Worker deployment uses `dist-worker/` as the static asset directory, so source folders such as `functions/`, `server/`, and `database/` are not exposed as public assets.
-> - `assets.run_worker_first = true` is enabled, which lets API routes like `/api`, `/upload`, `/file`, `/dav`, and `/random` run through the Worker before falling back to static frontend assets.
-> - `ASSETS` is handled internally by the `assets` section in `wrangler.jsonc`; for manual deployment you only need to fill in the `img_url` KV binding.
+> - The Worker deployment uses `.wrangler-assets/` as the static asset directory. Static files are copied from the project root before deploy, while `.assetsignore` keeps source folders such as `functions/`, `server/`, and `database/` out of public assets.
+> - `run_worker_first` is enabled, which lets API routes like `/api`, `/upload`, `/file`, `/dav`, and `/random` run through the Worker before falling back to static frontend assets.
+> - `ASSETS` is handled internally by the `[assets]` section in `wrangler.toml`; for manual deployment you only need to fill in the `img_url` KV binding.
 > - Cloudflare Workers environment sections do not inherit bindings automatically. If you add `env.production` or other environments later, repeat the `img_url` binding inside each environment.
 
 ## Notification About Switching to Telegram Channel

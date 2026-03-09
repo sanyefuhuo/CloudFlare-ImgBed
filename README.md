@@ -142,9 +142,9 @@
 >
 > ### 新增内容
 >
-> - 新增 `wrangler.jsonc`，用于 Worker 部署配置
-> - 新增 `workers/index.js`，复用现有 `functions/**` 接口逻辑
-> - 新增 `npm run worker:prepare`，会生成 `dist-worker/` 静态资源目录和 Worker 路由清单
+> - 新增 `wrangler.toml`，用于 Worker 部署配置
+> - 新增 `src/worker.js`，以显式路由表方式复用现有 `functions/**` 接口逻辑
+> - 新增 `scripts/copy-assets.mjs` 与 `.assetsignore`，在部署前自动准备 `.wrangler-assets/` 静态资源目录
 >
 > ### 部署步骤
 >
@@ -154,7 +154,7 @@
 >    npm install
 >    ```
 >
-> 2. 编辑 `wrangler.jsonc`，只需要配置 KV 绑定即可：
+> 2. 编辑 `wrangler.toml`，只需要配置 KV 绑定即可：
 >
 >    - `img_url`：KV 命名空间
 >
@@ -164,7 +164,13 @@
 >    npm run worker:dev
 >    ```
 >
-> 4. 部署到 Cloudflare Workers：
+> 4. 预构建检查：
+>
+>    ```bash
+>    npm run build:worker
+>    ```
+>
+> 5. 部署到 Cloudflare Workers：
 >
 >    ```bash
 >    npm run worker:deploy
@@ -172,9 +178,9 @@
 >
 > ### 说明
 >
-> - Worker 部署使用 `dist-worker/` 作为静态资源目录，不会把 `functions/`、`server/`、`database/` 等源码目录暴露为公网静态文件。
-> - `assets.run_worker_first = true` 已启用，因此 `/api`、`/upload`、`/file`、`/dav`、`/random` 等接口会优先由 Worker 处理，其他路径再回退到前端静态资源。
-> - `ASSETS` 是 Worker 静态资源能力使用的内部绑定，已由 `wrangler.jsonc` 中的 `assets` 配置自动处理；手动部署时你只需要填写 `img_url` 这一个 KV 绑定。
+> - Worker 部署使用 `.wrangler-assets/` 作为静态资源目录，部署前会自动从项目根目录复制静态文件，并通过 `.assetsignore` 排除 `functions/`、`server/`、`database/` 等源码目录。
+> - `run_worker_first` 已启用，因此 `/api`、`/upload`、`/file`、`/dav`、`/random` 等接口会优先由 Worker 处理，其他路径再回退到前端静态资源。
+> - `ASSETS` 是 Worker 静态资源能力使用的内部绑定，由 `wrangler.toml` 的 `[assets]` 配置自动处理；手动部署时你只需要填写 `img_url` 这一个 KV 绑定。
 > - Cloudflare Workers 的环境分组不会自动继承绑定；如果你后续要配置 `env.production` / `env.preview`，请在各环境下重复声明 `img_url`。
 
 ## 关于切换到 Telegram 渠道的通知

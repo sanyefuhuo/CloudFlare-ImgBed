@@ -1,0 +1,46 @@
+# Cloudflare Workers 静态资源排除列表
+
+# Worker 源码
+src/
+workers/
+
+# Functions 源码（Workers 模式下由 src/worker.js 直接 import）
+functions/
+
+# 依赖与构建产物
+node_modules/
+.wrangler/
+.wrangler-worker-build/
+.wrangler-assets/
+dist-worker/
+
+# 开发数据
+data/
+
+# 配置文件
+wrangler.toml
+wrangler.jsonc
+package.json
+package-lock.json
+.assetsignore
+.gitignore
+.dockerignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+
+# 文档
+README.md
+README_en.md
+LICENSE
+
+# Git
+.git/
+.github/
+
+# IDE
+.vscode/
+
+# 压缩文件（已有原始静态文件，无需上传 .gz）
+*.gz
