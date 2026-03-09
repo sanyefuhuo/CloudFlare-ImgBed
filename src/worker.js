@@ -119,9 +119,9 @@ function apiManageChain(handler) {
 }
 
 const ROUTES = [
-  { pattern: /^\/upload$/, params: () => ({}), middlewares: uploadMiddleware },
   { pattern: /^\/upload\/huggingface\/getUploadUrl$/, params: () => ({}), middlewares: [checkDatabaseConfig, postOnly(onUploadHfGetUploadUrlPost)] },
   { pattern: /^\/upload\/huggingface\/commitUpload$/, params: () => ({}), middlewares: [checkDatabaseConfig, postOnly(onUploadHfCommitPost)] },
+  { pattern: /^\/upload(\/.*)?$/, params: () => ({}), middlewares: uploadMiddleware },
 
   { pattern: /^\/file\/(.+)$/, params: (m) => ({ path: m[1] }), middlewares: fileMiddleware },
   { pattern: /^\/random(\/.*)?$/, params: () => ({}), middlewares: randomMiddleware },

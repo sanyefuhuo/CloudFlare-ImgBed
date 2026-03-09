@@ -23943,9 +23943,9 @@ function apiManageChain(handler) {
 }
 __name(apiManageChain, "apiManageChain");
 var ROUTES = [
-  { pattern: /^\/upload$/, params: /* @__PURE__ */ __name(() => ({}), "params"), middlewares: uploadMiddleware },
   { pattern: /^\/upload\/huggingface\/getUploadUrl$/, params: /* @__PURE__ */ __name(() => ({}), "params"), middlewares: [checkDatabaseConfig2, postOnly(onRequestPost)] },
   { pattern: /^\/upload\/huggingface\/commitUpload$/, params: /* @__PURE__ */ __name(() => ({}), "params"), middlewares: [checkDatabaseConfig2, postOnly(onRequestPost2)] },
+  { pattern: /^\/upload(\/.*)?$/, params: /* @__PURE__ */ __name(() => ({}), "params"), middlewares: uploadMiddleware },
   { pattern: /^\/file\/(.+)$/, params: /* @__PURE__ */ __name((m2) => ({ path: m2[1] }), "params"), middlewares: fileMiddleware },
   { pattern: /^\/random(\/.*)?$/, params: /* @__PURE__ */ __name(() => ({}), "params"), middlewares: randomMiddleware },
   { pattern: /^\/dav(\/.*)?$/, params: /* @__PURE__ */ __name((m2) => ({ path: m2[1]?.slice(1) ?? "" }), "params"), middlewares: davMiddleware },
