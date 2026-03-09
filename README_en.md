@@ -127,6 +127,48 @@
 > - All new version settings have been **migrated to the Admin Panel -> System Settings** interface, so generally no need to configure environment variables anymore. Settings made in the system settings interface will **override** environment variable settings. However, to ensure compatibility of images uploaded via the Telegram channel with the old version, **please keep any previously set Telegram-related environment variables!**
 > - After confirming the above settings are correct, go to the Pages management page, enter `Deployments`, and `Retry` the last failed deployment.
 
+## 2026.3.9 Cloudflare Workers Deployment Support
+
+> This repository now includes a Cloudflare Workers deployment entry in addition to the existing Cloudflare Pages deployment flow.
+>
+> ### What's included
+>
+> - `wrangler.jsonc` for Worker deployment configuration
+> - `workers/index.js` to reuse the existing `functions/**` serverless handlers
+> - `npm run worker:prepare` to generate a safe `dist-worker/` asset directory and the Worker route manifest
+>
+> ### Deployment steps
+>
+> 1. Install dependencies:
+>
+>    ```bash
+>    npm install
+>    ```
+>
+> 2. Update the bindings in `wrangler.jsonc` for the resources you actually use:
+>
+>    - `img_url`: KV namespace (optional, can be used instead of or together with D1)
+>    - `img_r2`: R2 bucket (required when using the Cloudflare R2 upload channel)
+>    - `img_d1`: D1 database (optional, can be used instead of or together with KV)
+>
+> 3. Run Workers locally:
+>
+>    ```bash
+>    npm run worker:dev
+>    ```
+>
+> 4. Deploy to Cloudflare Workers:
+>
+>    ```bash
+>    npm run worker:deploy
+>    ```
+>
+> ### Notes
+>
+> - The Worker deployment uses `dist-worker/` as the static asset directory, so source folders such as `functions/`, `server/`, and `database/` are not exposed as public assets.
+> - `assets.run_worker_first = true` is enabled, which lets API routes like `/api`, `/upload`, `/file`, `/dav`, and `/random` run through the Worker before falling back to static frontend assets.
+> - Cloudflare Workers environment sections do not inherit bindings automatically. If you add `env.production` or other environments later, repeat the required bindings inside each environment.
+
 ## Notification About Switching to Telegram Channel
 
 > Due to abuse of the telegraph image hosting, the upload channel has switched to Telegram Channel. Please **update to the latest version (see the last section of chapter 3.1 for update instructions)** and set `TG_BOT_TOKEN` and `TG_CHAT_ID` according to the deployment requirements in the documentation, otherwise upload functionality will not work.

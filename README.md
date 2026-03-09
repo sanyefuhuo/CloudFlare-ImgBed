@@ -136,6 +136,48 @@
 >
 > - 确保上述设置完成无误后，前往 pages 管理页面，进入`部署`，对最后一次不成功的部署进行`重试操作`
 
+## 2026.3.9 Cloudflare Workers 部署支持说明
+
+> 当前仓库已补充 Cloudflare Workers 部署入口，可与原有 Cloudflare Pages 部署方式并行使用。
+>
+> ### 新增内容
+>
+> - 新增 `wrangler.jsonc`，用于 Worker 部署配置
+> - 新增 `workers/index.js`，复用现有 `functions/**` 接口逻辑
+> - 新增 `npm run worker:prepare`，会生成 `dist-worker/` 静态资源目录和 Worker 路由清单
+>
+> ### 部署步骤
+>
+> 1. 安装依赖：
+>
+>    ```bash
+>    npm install
+>    ```
+>
+> 2. 按需编辑 `wrangler.jsonc` 中的绑定配置，至少配置你实际使用的 KV / R2 / D1 绑定：
+>
+>    - `img_url`：KV 命名空间（可选，与 D1 二选一或并存）
+>    - `img_r2`：R2 存储桶（使用 Cloudflare R2 渠道时需要）
+>    - `img_d1`：D1 数据库（可选，与 KV 二选一或并存）
+>
+> 3. 本地调试 Workers：
+>
+>    ```bash
+>    npm run worker:dev
+>    ```
+>
+> 4. 部署到 Cloudflare Workers：
+>
+>    ```bash
+>    npm run worker:deploy
+>    ```
+>
+> ### 说明
+>
+> - Worker 部署使用 `dist-worker/` 作为静态资源目录，不会把 `functions/`、`server/`、`database/` 等源码目录暴露为公网静态文件。
+> - `assets.run_worker_first = true` 已启用，因此 `/api`、`/upload`、`/file`、`/dav`、`/random` 等接口会优先由 Worker 处理，其他路径再回退到前端静态资源。
+> - Cloudflare Workers 的环境分组不会自动继承绑定；如果你后续要配置 `env.production` / `env.preview`，请在各环境下重复声明绑定。
+
 ## 关于切换到 Telegram 渠道的通知
 
 
@@ -218,4 +260,3 @@
   <a href="https://www.cloudflare.com"><img src="static/readme/cloudflare-logo.png" alt="Cloudflare Logo" height="25"></a> <a href="https://edgeone.ai/?from=github"><img src="/static/readme/edgeone-logo.png" alt="Tencent Logo" height="25"></a>
 
 - **[速维云](https://www.svyun.com/recommend/AELZ0UeMz8K11Zg7pEXC)**：提供云计算服务资源支持
-

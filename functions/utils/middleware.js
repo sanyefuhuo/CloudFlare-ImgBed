@@ -1,9 +1,30 @@
-import sentryPlugin from "@cloudflare/pages-plugin-sentry";
-import '@sentry/tracing';
 import { fetchOthersConfig } from "./sysConfig";
 import { checkDatabaseConfig as checkDbConfig } from './databaseAdapter.js';
 
 let disableTelemetry = false;
+
+function ensureSentryContext(context) {
+  if (!context.data) {
+    context.data = {};
+  }
+
+  if (context.data.sentry) {
+    return context.data.sentry;
+  }
+
+  const transaction = {
+    startChild: () => ({ finish: () => {} }),
+    finish: () => {}
+  };
+
+  context.data.sentry = {
+    setTag: () => {},
+    setContext: () => {},
+    startTransaction: () => transaction
+  };
+
+  return context.data.sentry;
+}
 
 export async function errorHandling(context) {
   // 读取KV中的设置
@@ -13,6 +34,7 @@ export async function errorHandling(context) {
   const env = context.env;
   if (!disableTelemetry) {
     context.data.telemetry = true;
+    ensureSentryContext(context);
     let remoteSampleRate = 0.001;
     try {
       const sampleRate = await fetchSampleRate(context)
@@ -21,11 +43,7 @@ export async function errorHandling(context) {
         remoteSampleRate = sampleRate;
       }
     } catch (e) { console.log(e) }
-    const sampleRate = env.sampleRate || remoteSampleRate;
-    return sentryPlugin({
-      dsn: "https://44b7b443108ec6d298044b125ff89d28@o4507644548022272.ingest.us.sentry.io/4507644555100160",
-      tracesSampleRate: sampleRate,
-    })(context);;
+    context.data.sampleRate = env.sampleRate || remoteSampleRate;
   }
 
   return context.next();
@@ -38,6 +56,7 @@ export async function telemetryData(context) {
   
   if (!disableTelemetry) {
     try {
+      ensureSentryContext(context);
       const parsedHeaders = {};
       context.request.headers.forEach((value, key) => {
         parsedHeaders[key] = value
@@ -46,7 +65,7 @@ export async function telemetryData(context) {
           context.data.sentry.setTag(key, value);
         }
       });
-      const CF = JSON.parse(JSON.stringify(context.request.cf));
+      const CF = JSON.parse(JSON.stringify(context.request.cf || {}));
       const parsedCF = {};
       for (const key in CF) {
         if (typeof CF[key] == "object") {
@@ -80,7 +99,9 @@ export async function telemetryData(context) {
     } catch (e) {
       console.log(e);
     } finally {
-      context.data.transaction.finish();
+      if (context.data.transaction) {
+        context.data.transaction.finish();
+      }
     }
   }
 
