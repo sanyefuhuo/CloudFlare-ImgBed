@@ -9,6 +9,7 @@ WORKDIR /app
 COPY . .
 
 RUN npm install --omit=dev && \
+    npm --prefix ./server install --omit=dev && \
     apt-get purge -y --auto-remove python3 make g++ && \
     rm -rf /root/.npm /tmp/*
 
