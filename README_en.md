@@ -145,11 +145,9 @@
 >    npm install
 >    ```
 >
-> 2. Update the bindings in `wrangler.jsonc` for the resources you actually use:
+> 2. Update `wrangler.jsonc`. Only the KV binding is required:
 >
->    - `img_url`: KV namespace (optional, can be used instead of or together with D1)
->    - `img_r2`: R2 bucket (required when using the Cloudflare R2 upload channel)
->    - `img_d1`: D1 database (optional, can be used instead of or together with KV)
+>    - `img_url`: KV namespace
 >
 > 3. Run Workers locally:
 >
@@ -167,7 +165,8 @@
 >
 > - The Worker deployment uses `dist-worker/` as the static asset directory, so source folders such as `functions/`, `server/`, and `database/` are not exposed as public assets.
 > - `assets.run_worker_first = true` is enabled, which lets API routes like `/api`, `/upload`, `/file`, `/dav`, and `/random` run through the Worker before falling back to static frontend assets.
-> - Cloudflare Workers environment sections do not inherit bindings automatically. If you add `env.production` or other environments later, repeat the required bindings inside each environment.
+> - `ASSETS` is handled internally by the `assets` section in `wrangler.jsonc`; for manual deployment you only need to fill in the `img_url` KV binding.
+> - Cloudflare Workers environment sections do not inherit bindings automatically. If you add `env.production` or other environments later, repeat the `img_url` binding inside each environment.
 
 ## Notification About Switching to Telegram Channel
 

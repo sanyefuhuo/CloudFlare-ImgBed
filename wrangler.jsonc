@@ -8,16 +8,8 @@
     "binding": "ASSETS",
     "run_worker_first": true,
     "not_found_handling": "single-page-application"
-  }
-  // Configure the bindings you actually use before deploying.
-  // Example:
-  // "kv_namespaces": [
-  //   { "binding": "img_url", "id": "<your-kv-namespace-id>" }
-  // ],
-  // "r2_buckets": [
-  //   { "binding": "img_r2", "bucket_name": "<your-r2-bucket-name>" }
-  // ],
-  // "d1_databases": [
-  //   { "binding": "img_d1", "database_name": "<your-d1-name>", "database_id": "<your-d1-id>" }
-  // ]
+  },
+  "kv_namespaces": [
+    { "binding": "img_url", "id": "<your-kv-namespace-id>" }
+  ]
 }

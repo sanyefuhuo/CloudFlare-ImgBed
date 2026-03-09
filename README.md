@@ -154,11 +154,9 @@
 >    npm install
 >    ```
 >
-> 2. 按需编辑 `wrangler.jsonc` 中的绑定配置，至少配置你实际使用的 KV / R2 / D1 绑定：
+> 2. 编辑 `wrangler.jsonc`，只需要配置 KV 绑定即可：
 >
->    - `img_url`：KV 命名空间（可选，与 D1 二选一或并存）
->    - `img_r2`：R2 存储桶（使用 Cloudflare R2 渠道时需要）
->    - `img_d1`：D1 数据库（可选，与 KV 二选一或并存）
+>    - `img_url`：KV 命名空间
 >
 > 3. 本地调试 Workers：
 >
@@ -176,7 +174,8 @@
 >
 > - Worker 部署使用 `dist-worker/` 作为静态资源目录，不会把 `functions/`、`server/`、`database/` 等源码目录暴露为公网静态文件。
 > - `assets.run_worker_first = true` 已启用，因此 `/api`、`/upload`、`/file`、`/dav`、`/random` 等接口会优先由 Worker 处理，其他路径再回退到前端静态资源。
-> - Cloudflare Workers 的环境分组不会自动继承绑定；如果你后续要配置 `env.production` / `env.preview`，请在各环境下重复声明绑定。
+> - `ASSETS` 是 Worker 静态资源能力使用的内部绑定，已由 `wrangler.jsonc` 中的 `assets` 配置自动处理；手动部署时你只需要填写 `img_url` 这一个 KV 绑定。
+> - Cloudflare Workers 的环境分组不会自动继承绑定；如果你后续要配置 `env.production` / `env.preview`，请在各环境下重复声明 `img_url`。
 
 ## 关于切换到 Telegram 渠道的通知
 
