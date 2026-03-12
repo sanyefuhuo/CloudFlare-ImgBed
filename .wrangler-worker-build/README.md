@@ -1,1 +1,1 @@
-This folder contains the built output assets for the worker "cloudflare-imgbed" generated at 2026-03-09T12:30:21.008Z.
+This folder contains the built output assets for the worker "cloudflare-imgbed" generated at 2026-03-12T11:02:04.366Z.

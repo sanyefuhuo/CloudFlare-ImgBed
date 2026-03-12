@@ -12,7 +12,7 @@
     "install:server": "npm --prefix ./server install",
     "build:worker": "wrangler deploy --dry-run --outdir .wrangler-worker-build",
     "worker:dev": "wrangler dev --ip 0.0.0.0 --port 8080 --persist-to ./data",
-    "worker:deploy": "wrangler deploy",
+    "worker:deploy": "node ./scripts/copy-assets.mjs && node ./scripts/ensure-kv-binding.mjs && wrangler deploy --config wrangler.toml",
     "worker:secret": "wrangler secret put"
   },
   "dependencies": {

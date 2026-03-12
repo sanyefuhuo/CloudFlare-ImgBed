@@ -154,9 +154,7 @@
 >    npm install
 >    ```
 >
-> 2. 编辑 `wrangler.toml`，只需要配置 KV 绑定即可：
->
->    - `img_url`：KV 命名空间
+> 2. 直接执行部署命令即可；如果项目根目录下没有 `wrangler.toml`，或 `img_url` KV 绑定尚未配置，部署脚本会自动创建/更新本地 `wrangler.toml`，并在 Cloudflare 账号中自动创建并绑定一个名为 `cloudflare-imgbed-img-url` 的 KV 命名空间（可通过 `CF_KV_NAMESPACE_TITLE` 自定义名称）。
 >
 > 3. 本地调试 Workers：
 >
@@ -181,6 +179,7 @@
 > - Worker 部署使用 `.wrangler-assets/` 作为静态资源目录，部署前会自动从项目根目录复制静态文件，并通过 `.assetsignore` 排除 `functions/`、`server/`、`database/` 等源码目录。
 > - `run_worker_first` 已启用，因此 `/api`、`/upload`、`/file`、`/dav`、`/random` 等接口会优先由 Worker 处理，其他路径再回退到前端静态资源。
 > - `ASSETS` 是 Worker 静态资源能力使用的内部绑定，由 `wrangler.toml` 的 `[assets]` 配置自动处理；手动部署时你只需要填写 `img_url` 这一个 KV 绑定。
+> - `npm run worker:deploy` 会先同步 `.wrangler-assets/`、检查 `wrangler.toml`，再自动补齐 `img_url` KV 绑定；如果账号里不存在目标 KV 命名空间，则会自动创建后再部署。
 > - Cloudflare Workers 的环境分组不会自动继承绑定；如果你后续要配置 `env.production` / `env.preview`，请在各环境下重复声明 `img_url`。
 
 ## 关于切换到 Telegram 渠道的通知

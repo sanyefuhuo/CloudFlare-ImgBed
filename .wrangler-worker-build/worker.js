@@ -3281,6 +3281,30 @@ async function fetchOthersConfig(env) {
 }
 __name(fetchOthersConfig, "fetchOthersConfig");
 
+// functions/utils/tokenExpiration.js
+function isExpired(expiresAt, now = /* @__PURE__ */ new Date()) {
+  if (expiresAt === null || expiresAt === void 0) {
+    return false;
+  }
+  const expiresDate = new Date(expiresAt);
+  const currentTime = now instanceof Date ? now : new Date(now);
+  return currentTime.getTime() > expiresDate.getTime();
+}
+__name(isExpired, "isExpired");
+function filterAutoDeleteTokens(tokens, now = /* @__PURE__ */ new Date()) {
+  const toDelete = [];
+  const toKeep = [];
+  for (const token of tokens) {
+    if (isExpired(token.expiresAt, now) && token.autoDelete === true) {
+      toDelete.push(token);
+    } else {
+      toKeep.push(token);
+    }
+  }
+  return { toDelete, toKeep };
+}
+__name(filterAutoDeleteTokens, "filterAutoDeleteTokens");
+
 // functions/api/manage/apiTokens.js
 async function onRequest5(context) {
   const {
@@ -3300,7 +3324,7 @@ async function onRequest5(context) {
   }
   if (method === "POST") {
     const body = await request.json();
-    const { name, permissions, owner } = body;
+    const { name, permissions, owner, expiresAt = null, autoDelete = false } = body;
     if (!name || !permissions || !owner) {
       return new Response(JSON.stringify({ error: "\u7F3A\u5C11\u5FC5\u8981\u53C2\u6570" }), {
         status: 400,
@@ -3309,7 +3333,7 @@ async function onRequest5(context) {
         }
       });
     }
-    const token = await createApiToken(db, name, permissions, owner);
+    const token = await createApiToken(db, name, permissions, owner, expiresAt, autoDelete);
     return new Response(JSON.stringify(token), {
       headers: {
         "content-type": "application/json"
@@ -3335,7 +3359,7 @@ async function onRequest5(context) {
   }
   if (method === "PUT") {
     const body = await request.json();
-    const { tokenId, permissions } = body;
+    const { tokenId, permissions, expiresAt = null, autoDelete = false } = body;
     if (!tokenId || !permissions) {
       return new Response(JSON.stringify({ error: "\u7F3A\u5C11\u5FC5\u8981\u53C2\u6570" }), {
         status: 400,
@@ -3344,7 +3368,7 @@ async function onRequest5(context) {
         }
       });
     }
-    const result = await updateApiToken(db, tokenId, permissions);
+    const result = await updateApiToken(db, tokenId, permissions, expiresAt, autoDelete);
     return new Response(JSON.stringify(result), {
       headers: {
         "content-type": "application/json"
@@ -3358,7 +3382,7 @@ async function getApiTokens(db) {
   const settingsStr = await db.get("manage@sysConfig@security");
   const settings = settingsStr ? JSON.parse(settingsStr) : {};
   const tokens = settings.apiTokens?.tokens || {};
-  const tokenList = Object.keys(tokens).map((id) => {
+  const tokenArray = Object.keys(tokens).map((id) => {
     const token = tokens[id];
     return {
       id,
@@ -3367,14 +3391,34 @@ async function getApiTokens(db) {
       permissions: token.permissions,
       createdAt: token.createdAt,
       updatedAt: token.updatedAt,
-      token: token.token.substr(0, 15) + "..."
-      // 只显示前15位
+      token: token.token,
+      expiresAt: token.expiresAt ?? null,
+      autoDelete: token.autoDelete ?? false
     };
   });
+  const { toDelete, toKeep } = filterAutoDeleteTokens(tokenArray);
+  if (toDelete.length > 0) {
+    for (const t2 of toDelete) {
+      delete settings.apiTokens.tokens[t2.id];
+    }
+    await db.put("manage@sysConfig@security", JSON.stringify(settings));
+  }
+  const tokenList = toKeep.map((t2) => ({
+    id: t2.id,
+    name: t2.name,
+    owner: t2.owner,
+    permissions: t2.permissions,
+    createdAt: t2.createdAt,
+    updatedAt: t2.updatedAt,
+    token: t2.token.substr(0, 15) + "...",
+    // 只显示前15位
+    expiresAt: t2.expiresAt,
+    autoDelete: t2.autoDelete
+  }));
   return { tokens: tokenList };
 }
 __name(getApiTokens, "getApiTokens");
-async function createApiToken(db, name, permissions, owner) {
+async function createApiToken(db, name, permissions, owner, expiresAt = null, autoDelete = false) {
   const settingsStr = await db.get("manage@sysConfig@security");
   const settings = settingsStr ? JSON.parse(settingsStr) : {};
   if (!settings.apiTokens) {
@@ -3390,7 +3434,9 @@ async function createApiToken(db, name, permissions, owner) {
     owner,
     permissions,
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    expiresAt: expiresAt ?? null,
+    autoDelete: autoDelete === true
   };
   settings.apiTokens.tokens[tokenId] = tokenData;
   await db.put("manage@sysConfig@security", JSON.stringify(settings));
@@ -3401,7 +3447,9 @@ async function createApiToken(db, name, permissions, owner) {
     owner,
     permissions,
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    expiresAt: tokenData.expiresAt,
+    autoDelete: tokenData.autoDelete
   };
 }
 __name(createApiToken, "createApiToken");
@@ -3416,7 +3464,7 @@ async function deleteApiToken(db, tokenId) {
   return { success: true, message: "Token \u5DF2\u5220\u9664" };
 }
 __name(deleteApiToken, "deleteApiToken");
-async function updateApiToken(db, tokenId, permissions) {
+async function updateApiToken(db, tokenId, permissions, expiresAt = null, autoDelete = false) {
   const settingsStr = await db.get("manage@sysConfig@security");
   const settings = settingsStr ? JSON.parse(settingsStr) : {};
   if (!settings.apiTokens?.tokens?.[tokenId]) {
@@ -3424,10 +3472,12 @@ async function updateApiToken(db, tokenId, permissions) {
   }
   settings.apiTokens.tokens[tokenId].permissions = permissions;
   settings.apiTokens.tokens[tokenId].updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  settings.apiTokens.tokens[tokenId].expiresAt = expiresAt ?? null;
+  settings.apiTokens.tokens[tokenId].autoDelete = autoDelete === true;
   await db.put("manage@sysConfig@security", JSON.stringify(settings));
   return {
     success: true,
-    message: "Token \u6743\u9650\u5DF2\u66F4\u65B0",
+    message: "Token \u5DF2\u66F4\u65B0",
     token: settings.apiTokens.tokens[tokenId]
   };
 }
@@ -3445,18 +3495,29 @@ function generateTokenId() {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
 __name(generateTokenId, "generateTokenId");
-async function getTokenPermissions(db, token) {
+async function getTokenData(db, token) {
   const settingsStr = await db.get("manage@sysConfig@security");
   const settings = settingsStr ? JSON.parse(settingsStr) : {};
   const tokens = settings.apiTokens?.tokens || {};
   for (const tokenId in tokens) {
     if (tokens[tokenId].token === token) {
-      return tokens[tokenId].permissions;
+      const t2 = tokens[tokenId];
+      return {
+        id: t2.id,
+        name: t2.name,
+        token: t2.token,
+        owner: t2.owner,
+        permissions: t2.permissions,
+        createdAt: t2.createdAt,
+        updatedAt: t2.updatedAt,
+        expiresAt: t2.expiresAt ?? null,
+        autoDelete: t2.autoDelete ?? false
+      };
     }
   }
   return null;
 }
-__name(getTokenPermissions, "getTokenPermissions");
+__name(getTokenData, "getTokenData");
 
 // functions/utils/tokenValidator.js
 async function validateApiToken(request, db, requiredPermission) {
@@ -3473,11 +3534,14 @@ async function validateApiToken(request, db, requiredPermission) {
   if (!token) {
     return { valid: false, error: "\u65E0\u6548\u7684Token\u683C\u5F0F" };
   }
-  const permissions = await getTokenPermissions(db, token);
-  if (!permissions) {
+  const tokenData = await getTokenData(db, token);
+  if (!tokenData) {
     return { valid: false, error: "\u65E0\u6548\u7684Token" };
   }
-  if (requiredPermission !== null && !permissions.includes(requiredPermission)) {
+  if (isExpired(tokenData.expiresAt)) {
+    return { valid: false, error: "Token \u5DF2\u8FC7\u671F" };
+  }
+  if (requiredPermission !== null && !tokenData.permissions.includes(requiredPermission)) {
     return { valid: false, error: `\u7F3A\u5C11${requiredPermission}\u6743\u9650` };
   }
   return { valid: true };
@@ -6195,7 +6259,7 @@ var createIsIdentityExpiredFunction = /* @__PURE__ */ __name((expirationMs) => /
 var EXPIRATION_MS = 3e5;
 var isIdentityExpired = createIsIdentityExpiredFunction(EXPIRATION_MS);
 var doesIdentityRequireRefresh = /* @__PURE__ */ __name((identity) => identity.expiration !== void 0, "doesIdentityRequireRefresh");
-var memoizeIdentityProvider = /* @__PURE__ */ __name((provider, isExpired, requiresRefresh) => {
+var memoizeIdentityProvider = /* @__PURE__ */ __name((provider, isExpired2, requiresRefresh) => {
   if (provider === void 0) {
     return void 0;
   }
@@ -6217,7 +6281,7 @@ var memoizeIdentityProvider = /* @__PURE__ */ __name((provider, isExpired, requi
     }
     return resolved;
   }, "coalesceProvider");
-  if (isExpired === void 0) {
+  if (isExpired2 === void 0) {
     return async (options) => {
       if (!hasResult || options?.forceRefresh) {
         resolved = await coalesceProvider(options);
@@ -6236,7 +6300,7 @@ var memoizeIdentityProvider = /* @__PURE__ */ __name((provider, isExpired, requi
       isConstant = true;
       return resolved;
     }
-    if (isExpired(resolved)) {
+    if (isExpired2(resolved)) {
       await coalesceProvider(options);
       return resolved;
     }
@@ -6245,7 +6309,7 @@ var memoizeIdentityProvider = /* @__PURE__ */ __name((provider, isExpired, requi
 }, "memoizeIdentityProvider");
 
 // node_modules/@smithy/property-provider/dist-es/memoize.js
-var memoize = /* @__PURE__ */ __name((provider, isExpired, requiresRefresh) => {
+var memoize = /* @__PURE__ */ __name((provider, isExpired2, requiresRefresh) => {
   let resolved;
   let pending;
   let hasResult;
@@ -6263,7 +6327,7 @@ var memoize = /* @__PURE__ */ __name((provider, isExpired, requiresRefresh) => {
     }
     return resolved;
   }, "coalesceProvider");
-  if (isExpired === void 0) {
+  if (isExpired2 === void 0) {
     return async (options) => {
       if (!hasResult || options?.forceRefresh) {
         resolved = await coalesceProvider();
@@ -6282,7 +6346,7 @@ var memoize = /* @__PURE__ */ __name((provider, isExpired, requiresRefresh) => {
       isConstant = true;
       return resolved;
     }
-    if (isExpired(resolved)) {
+    if (isExpired2(resolved)) {
       await coalesceProvider();
       return resolved;
     }
@@ -10757,8 +10821,8 @@ var S3ExpressIdentityProviderImpl = class _S3ExpressIdentityProviderImpl {
     const entry = cache2.get(key);
     if (entry) {
       return entry.identity.then((identity) => {
-        const isExpired = (identity.expiration?.getTime() ?? 0) < Date.now();
-        if (isExpired) {
+        const isExpired2 = (identity.expiration?.getTime() ?? 0) < Date.now();
+        if (isExpired2) {
           return cache2.set(key, new S3ExpressIdentityCacheEntry(this.getIdentity(key))).identity;
         }
         const isExpiringSoon = (identity.expiration?.getTime() ?? 0) < Date.now() + _S3ExpressIdentityProviderImpl.REFRESH_WINDOW_MS;
@@ -20840,7 +20904,7 @@ function extractRequiredPermission(pathname) {
   if (pathParts.includes("list")) {
     return "list";
   }
-  return null;
+  return "manage";
 }
 __name(extractRequiredPermission, "extractRequiredPermission");
 var corsHeaders2 = {

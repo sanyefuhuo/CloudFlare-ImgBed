@@ -145,9 +145,7 @@
 >    npm install
 >    ```
 >
-> 2. Update `wrangler.toml`. Only the KV binding is required:
->
->    - `img_url`: KV namespace
+> 2. You can deploy directly. If `wrangler.toml` is missing, or the `img_url` KV binding has not been configured yet, the deploy script will create/update a local `wrangler.toml` automatically and create/bind a KV namespace named `cloudflare-imgbed-img-url` in your Cloudflare account (customizable with `CF_KV_NAMESPACE_TITLE`).
 >
 > 3. Run Workers locally:
 >
@@ -172,6 +170,7 @@
 > - The Worker deployment uses `.wrangler-assets/` as the static asset directory. Static files are copied from the project root before deploy, while `.assetsignore` keeps source folders such as `functions/`, `server/`, and `database/` out of public assets.
 > - `run_worker_first` is enabled, which lets API routes like `/api`, `/upload`, `/file`, `/dav`, and `/random` run through the Worker before falling back to static frontend assets.
 > - `ASSETS` is handled internally by the `[assets]` section in `wrangler.toml`; for manual deployment you only need to fill in the `img_url` KV binding.
+> - `npm run worker:deploy` now prepares `.wrangler-assets/`, checks `wrangler.toml`, and auto-fills the `img_url` KV binding. If the target KV namespace does not exist yet, it will be created automatically before deployment.
 > - Cloudflare Workers environment sections do not inherit bindings automatically. If you add `env.production` or other environments later, repeat the `img_url` binding inside each environment.
 
 ## Notification About Switching to Telegram Channel
